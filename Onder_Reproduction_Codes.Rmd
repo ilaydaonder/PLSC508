@@ -1,0 +1,301 @@
+---
+title: "PLSC 508 Replication Data"
+subtitle: "Fratricide in rebel movements: A network analysis of Syrian militant infighting"
+author: "Ilayda Onder"
+date: "2/24/2020"
+output: html_document
+---
+
+**Follow along with the code and data for this tutorial by cloning the repo at [https://github.com/ilaydaonder/PLSC508/blob/master/Infighting30_2014_6Sep2017.csv](https://github.com/ilaydaonder/PLSC508/blob/master/Infighting30_2014_6Sep2017.csv)**
+
+
+```{r setup, include = F}
+knitr::opts_chunk$set(fig.width = 3, fig.height = 2)
+```
+
+```{r load libraries}
+# install.packages("splitstackshape")
+# install.packages("amen")
+library(RCurl) # load data from github
+library(statnet)
+library(ggplot2)
+library(GGally)
+library(ggnetwork)
+library(splitstackshape)
+library(gridExtra)
+library(amen)
+library(stargazer)
+
+options(scipen = 12) # bias against scientific notation
+options(digits = 4) # show fewer decimal places
+```
+
+```{r load data}
+url <- getURL("https://raw.githubusercontent.com/ilaydaonder/PLSC508/master/Infighting30_2014_6Sep2017.csv")
+infight.df <- read.csv(text = url,
+                       stringsAsFactors = F,
+                       header = T)
+infight.df$X <- as.character(infight.df$X)
+rm(url)
+
+infight <- infight.df # replicate data frame
+row.names(infight) <- infight$X # make the first column rownames
+infight[1] <- NULL # delete first column
+infight <- as.matrix(infight) # convert data frame to matrix
+```
+
+```{r create network object}
+net1 <- network(infight, 
+                matrix.type = 'adjacency', 
+                directed = F,
+                ignore.eval = F,
+                names.eval = "weight")
+```
+
+```{r load network attributes}
+url <- getURL("https://raw.githubusercontent.com/ilaydaonder/PLSC508/master/IdeologyVars_JPR.csv")
+attr <- read.csv(text = url, 
+                     stringsAsFactors = F,
+                     header = T)
+rm(url)
+attr$Powerbroker <- as.character(attr$Powerbroker)
+```
+
+```{r clean node attributes}
+attr <- cSplit(attr, "State.Sponsors", ",")
+attr$NumberSupporter <- 0
+attr$NumberSupporter[!is.na(attr$State.Sponsors_1) 
+                     & is.na(attr$State.Sponsors_2) 
+                     & is.na(attr$State.Sponsors_3)] <- 1
+attr$NumberSupporter[!is.na(attr$State.Sponsors_1) 
+                     & !is.na(attr$State.Sponsors_2) 
+                     & is.na(attr$State.Sponsors_3)] <- 2
+attr$NumberSupporter[!is.na(attr$State.Sponsors_1) 
+                     & !is.na(attr$State.Sponsors_2) 
+                     & !is.na(attr$State.Sponsors_3)] <- 3
+attr$Islamism.Salafism <- as.numeric(attr$Islamism.Salafism)
+attr$Sectarianism <- as.numeric(attr$Sectarianism)
+attr$GroupSize <- as.numeric(attr$GroupSize)
+attr$NumberSupporter <- as.numeric(attr$NumberSupporter)
+
+set.vertex.attribute(net1, 'group_size', attr$GroupSize) # add group size variable
+set.vertex.attribute(net1, 'power_broker', attr$Powerbroker) # add power broker variable
+set.vertex.attribute(net1, 'islamisme', attr$Islamism.Salafism) # add islamism variable
+set.vertex.attribute(net1, 'secterian', attr$Sectarianism) # add sectarianism variable
+set.vertex.attribute(net1, 'numbersupporter', attr$NumberSupporter) # add number of state supporters variable
+set.vertex.attribute(net1, 'labels', attr$GroupCode) # add group names
+```
+
+```{r run layout algorithm}
+set.seed(123456)
+net1_fr <- ggnetwork(net1, layout = 'fruchtermanreingold')
+net1_kk <- ggnetwork(net1, layout = 'kamadakawai')
+net1_cir <- ggnetwork(net1, layout = 'circle')
+```
+
+```{r visualize network}
+ggplot(data = net1_fr, aes(x, y, xend = xend, yend = yend)) +
+  geom_edges(color = 'grey75', size = 1) +
+  geom_nodes(aes(color = power_broker, size = group_size)) +
+  scale_color_manual(values = c("black", "firebrick")) +
+  geom_nodetext_repel(aes(label = labels)) +
+  theme_blank() +
+  theme(legend.position = "bottom") +
+  guides(size = F) +
+  labs(title = 'Network of Syrian militant infighting', color = 'Power Broker Role')
+```
+
+```{r visualize node attributes}
+# group size
+ggplot(attr, aes(x = GroupSize)) +
+  theme_minimal() +
+  geom_histogram(aes(y = ..density..), fill = "darkorange", alpha = 1, bins = 20, col = "white") +
+    stat_function(fun = dnorm,
+        args = list(mean = mean(attr$GroupSize, na.rm = TRUE),
+                    sd = sd(attr$GroupSize, na.rm = TRUE)),
+        colour = 'black', size = 1) +
+    labs(title = "Figure 2: Density Histogram of Syrian Rebel Groups' Size",
+       x = "Number of Militants",
+       y = "Density",
+       subtitle = "An estimate of group size during the critical period of 2014-2015",
+       caption = "Source: The Mapping Militant Organization data and self-reported numbers")
+
+# power broker role
+ggplot(attr, aes(x = Powerbroker)) + 
+  theme_minimal() +
+  geom_bar(fill = "darkorange") +
+  scale_x_discrete(labels = c("Not a Power Broker", "Power Broker")) +
+    labs(title = "Figure 3: Histogram of Syrian Rebel Groups' Power Broker Role",
+       x = "Power Broker Role",
+       y = "Number of Groups",
+       subtitle = "Power Brokers are large in size and allied to either the U.S or ISIS",
+       caption = "Source: The Mapping Militant Organization data and Cafarella & Casagrande (2016)")
+
+# number of state supporters
+ggplot(attr, aes(x = NumberSupporter)) + 
+  theme_minimal() +
+  geom_histogram(fill = "darkorange", bins = 4, col = "white") +
+    labs(title = "Figure 4: Histogram of Syrian Rebel Groups' Number of State Supporters",
+       x = "Number of State Supporters",
+       y = "Number of Groups",
+       subtitle = "",
+       caption = "Source: Secondary Data")
+
+# ideology 1: islamism
+ggplot(attr, aes(x = Islamism.Salafism)) + 
+  theme_minimal() +
+  geom_histogram(fill = "darkorange", bins = 5, col = "white") +
+    labs(title = "Figure 5: Histogram of Syrian Rebel Groups' Islamist Ideology Scores",
+       x = "Islamist Ideology Score",
+       y = "Number of Groups",
+       subtitle = "A higher score indicates a stronger commitment to Islamist ideology",
+       caption = "Source: Secondary Data")
+
+# ideology 2: sectarianism
+ggplot(attr, aes(x = Sectarianism)) + 
+  theme_minimal() +
+  geom_histogram(fill = "darkorange", bins = 5, col = "white") +
+    labs(title = "Figure 6: Histogram of Syrian Rebel Groups' Sectarian Ideology Scores",
+       x = "Sectarian Ideology Score",
+       y = "Number of Groups",
+       subtitle = "A higher score indicates a stronger commitment to a sectarian ideology",
+       caption = "Source: Secondary Data")
+```
+
+
+# REPLICATION
+
+```{r create dummies}
+# state supporter dummy
+attr$State.Sponsors_1 <- as.character(attr$State.Sponsors_1)
+attr$State.Sponsors_2 <- as.character(attr$State.Sponsors_2)
+attr$State.Sponsors_3 <- as.character(attr$State.Sponsors_3)
+attr$State.Sponsors_1[is.na(attr$State.Sponsors_1)] <- 0
+attr$State.Sponsors_2[is.na(attr$State.Sponsors_2)] <- 0
+attr$State.Sponsors_3[is.na(attr$State.Sponsors_3)] <- 0
+attr$State.Sponsors <- 1
+attr$State.Sponsors[attr$NumberSupporter == 0] <- 0
+
+# isis dummy
+attr$ISIS[attr$GroupCode == "ISIL"] <- 1
+attr$ISIS[attr$GroupCode != "ISIL"] <- 0
+```
+
+```{r}
+# Creating Xn and Xd for AME analysis 
+a <- array(attr$State.Sponsors) # state sponsor dummy
+b <- array(attr$AVG.Score) # average ideology score
+c <- array(attr$GroupSize) # group size
+ISIS <- array(attr$ISIS) # ISIS dummy
+a_a <- c/1000 # Putting them on similar scale for rough interp
+Xn <- as.array(cbind(b, a_a, a, ISIS)) # AME takes arrays
+dimnames(Xn)[[1]] <- attr$GroupCode # Labling rows (groups), already ordered/matched above
+dimnames(Xn)[[2]] <- c("averageId", "size", "spons", "ISIL") # Lable columns
+## Creating Xn and Xd for AME analysis  WITHOUT ISIS
+Xn_b <- as.array(cbind(b, a_a, a)) # AME takes arrays
+dimnames(Xn_b)[[1]] <- attr$GroupCode # Labling rows (groups), already ordered/matched above
+dimnames(Xn_b)[[2]] <- c("averageId", "size", "spons") # Lable columns
+
+## Constructing dyadic vars
+ad <- as.data.frame(Xn) # Generate a dataframe from your array
+ideol_diff <- outer(ad$averageId, ad$averageId, "-") # Make a matrix where each square represents the difference in ideology scores of a given dyad
+ideol_diff <- abs(ideol_diff) # Has to be postive - so take the absolute value 
+power_diff <- outer(ad$size, ad$size, "-") # Replicates the above for power
+power_diff <- abs(power_diff)
+```
+
+```{r}
+# Load State Sponsor and Location Matrcies 
+url <- getURL("https://raw.githubusercontent.com/ilaydaonder/PLSC508/master/LocationDiff_Infighting_6June2018.csv")
+loc <- read.csv(text = url, stringsAsFactors = F, header = T) # Load shared location matrix 
+rm(url)
+x <- loc$X # Deal with row and column names as above
+loc <- loc[,-1]
+colnames(loc) <- x
+rownames(loc) <- x
+dim(loc) # Check dimentions 
+loc <- as.matrix(loc) # Convert to matrix format
+dimnames(loc)[[1]] <- x
+dimnames(loc)[[2]] <- x
+locFinal <- loc[attr$GroupCode,] # Make order of "loc" match order of ideology and everything else
+locFinal <- locFinal[,attr$GroupCode] # And match on the other axis... 
+
+## state sponorship
+url <- getURL("https://raw.githubusercontent.com/ilaydaonder/PLSC508/master/stateSponsonership_InfightingGroups_6June2018.csv")
+spons <- read.csv(text = url, stringsAsFactors = F, header = T)
+x <- spons$X
+spons <- spons[,-1]
+rownames(spons) <- x
+colnames(spons) <- x
+spons <- as.matrix(spons)
+dimnames(spons)[[1]] <- x
+dimnames(spons)[[2]] <- x
+sponsFinal <- spons[attr$GroupCode,]
+sponsFinal <- sponsFinal[,attr$GroupCode]
+```
+
+```{r}
+# Create an empty array to hold your matrcies (dyad vars) for AME
+Xd <- array(dim = c(nrow(infight), nrow(infight), 4)) # Must be same dimentions as number of groups (rows and columns) and have enough "slices" to fit all dyad vars  
+Xd[,,1] <- ideol_diff # Average ideology dyad
+Xd[,,2] <- power_diff  # Size dyad
+Xd[,,3] <- as.matrix(locFinal) # location shared dyad
+Xd[,,4] <- as.matrix(sponsFinal) # sponsorship shared dyad 
+
+dimnames(Xd)[[1]] <- attr$GroupCode
+dimnames(Xd)[[2]] <- attr$GroupCode
+dimnames(Xd)[[3]] <- c("ideol_diff", "powerdiff", "loc", "spons")
+```
+
+```{r}
+# Modeling 
+diag(infight) <- 0 #AMEN won't take NAs
+Yreal <- as.matrix(infight) # For raw count 
+Yrealsqr <- sqrt(Yreal) # For square root - best practice as AME doesn't take a count model, 
+#this should better approximate a normal distirubiton
+
+ybin <- Yreal
+ybin[ybin > 0] <- 1
+```
+
+```{r main models in Table II}
+### for sqrt transformed 
+fit_infighting_Bivariate_power_sqrt<-ame(Yrealsqr, power_diff, R=1, model="nrm", # model 1 (power)
+                                    symmetric=TRUE,burn=10000,nscan=10000,odens=10)
+fit_infighting_Bivariate_ideol_sqrt<-ame(Yrealsqr, ideol_diff, R=1, model="nrm", # model 2 (ideology)
+                                    symmetric=TRUE,burn=10000,nscan=10000,odens=10)
+fit_infighting_Bivariate_spons_sqrt<-ame(Yrealsqr, sponsFinal,  R=1, model="nrm", # model 3 (sponsor)
+                                    symmetric=TRUE,burn=10000,nscan=10000,odens=10)
+fit_nodesdyads_noIsis_sqrt<-ame(Yrealsqr, Xd, Xn_b, R=1, model="nrm", # model 4 (full)
+                                     symmetric=TRUE,burn=10000,nscan=10000,odens=10)
+fit_nodesdyads_Isis_sqrt<-ame(Yrealsqr, Xd, Xn, R=1, model="nrm", # model 5 (no isis)
+                                symmetric=TRUE,burn=10000,nscan=10000,odens=10)
+```
+
+```{r}
+summary(fit_infighting_Bivariate_power_sqrt)
+summary(fit_infighting_Bivariate_ideol_sqrt)
+summary(fit_infighting_Bivariate_spons_sqrt)
+summary(fit_nodesdyads_noIsis_sqrt)
+summary(fit_nodesdyads_Isis_sqrt)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
